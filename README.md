@@ -216,7 +216,20 @@ docker compose up --build
 - MySQL Port: `3306`
 
 ### Vercel Backend
-Set the Vercel project root directory to `backend` and use Node.js `22.x` (also pinned in `backend/package.json` for `better-sqlite3` compatibility). Configure `JWT_SECRET` as a Vercel environment variable. SQLite files on Vercel are not persistent, so production deployments need a hosted database.
+Set the Vercel project root directory to `backend` and use Node.js `22.x` (also pinned in `backend/package.json`). Add these environment variables using the values from your hosted MySQL provider:
+
+| Variable | Value |
+| :--- | :--- |
+| `DB_TYPE` | `mysql` |
+| `DB_HOST` | Hosted MySQL host |
+| `DB_PORT` | MySQL port, usually `3306` |
+| `DB_NAME` | Database name |
+| `DB_USER` | Database username |
+| `DB_PASSWORD` | Database password |
+| `DB_SSL` | `true` if required by the provider |
+| `JWT_SECRET` | A unique random secret |
+
+The backend creates the MySQL tables and seeds role accounts when the database is empty. The documented demo credentials are intended for evaluation; change them before using this deployment with real users.
 
 ### Kubernetes Deployment
 ```bash

@@ -7,44 +7,44 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbType = process.env.DB_TYPE || 'sqlite';
+export const dbType = process.env.DB_TYPE || (process.env.VERCEL ? 'mysql' : 'sqlite');
 
 let sqliteDb = null;
 let mysqlPool = null;
 
 if (dbType === 'mysql') {
-  if (!process.env.DB_PASSWORD) {
-    throw new Error('DB_PASSWORD is required when DB_TYPE is mysql');
+  const requiredMySqlEnv = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+  const missingMySqlEnv = requiredMySqlEnv.filter(name => !process.env[name]);
+  if (missingMySqlEnv.length) {
+    throw new Error(`Missing MySQL configuration: ${missingMySqlEnv.join(', ')}`);
   }
 
-  try {
-    mysqlPool = mysql.createPool({
-      host: process.env.DB_HOST || 'localhost',
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME || 'community_connect',
-      port: parseInt(process.env.DB_PORT || '3306', 10),
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-      decimalNumbers: true
-    });
-    console.log('Connected to MySQL database pool');
-  } catch (err) {
-    console.error('MySQL connection error, falling back to SQLite:', err.message);
+  mysqlPool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    port: parseInt(process.env.DB_PORT || '3306', 10),
+    waitForConnections: true,
+    connectionLimit: 3,
+    queueLimit: 0,
+    decimalNumbers: true,
+    ssl: process.env.DB_SSL === 'true' ? {} : undefined
+  });
+  console.log('Configured MySQL database pool');
+} else if (dbType === 'sqlite') {
+  const dataDir = path.join(__dirname, '../../data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
   }
-}
 
-// Default SQLite setup
-const dataDir = path.join(__dirname, '../../data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+  const sqlitePath = path.join(dataDir, 'community_connect.sqlite');
+  sqliteDb = new Database(sqlitePath);
+  sqliteDb.pragma('journal_mode = WAL');
+  sqliteDb.pragma('foreign_keys = ON');
+} else {
+  throw new Error(`Unsupported DB_TYPE: ${dbType}`);
 }
-
-const sqlitePath = path.join(dataDir, 'community_connect.sqlite');
-sqliteDb = new Database(sqlitePath);
-sqliteDb.pragma('journal_mode = WAL');
-sqliteDb.pragma('foreign_keys = ON');
 
 /**
  * Universal query runner: executes queries transparently across SQLite or MySQL
@@ -52,15 +52,14 @@ sqliteDb.pragma('foreign_keys = ON');
  */
 export async function query(sql, params = []) {
   if (mysqlPool) {
-    try {
-      const [rows] = await mysqlPool.execute(sql, params);
-      return rows;
-    } catch (err) {
-      console.warn('MySQL query failed, falling back to SQLite:', err.message);
-    }
+    const [rows] = await mysqlPool.execute(sql, params);
+    return rows;
   }
 
-  // SQLite execution
+  if (!sqliteDb) {
+    throw new Error('No database connection is configured');
+  }
+
   const trimmed = sql.trim().toUpperCase();
   try {
     if (trimmed.startsWith('SELECT') || trimmed.startsWith('PRAGMA')) {

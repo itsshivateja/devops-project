@@ -1,5 +1,75 @@
 import bcrypt from 'bcryptjs';
-import { sqliteDb } from './db.js';
+import { readFileSync } from 'fs';
+import { dbType, mysqlPool, sqliteDb } from './db.js';
+
+async function initializeMySqlSchema() {
+  const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8')
+    .replace(/^CREATE DATABASE IF NOT EXISTS[^;]+;\s*/im, '')
+    .replace(/^USE\s+[^;]+;\s*/im, '');
+  const statements = schema
+    .replace(/^--.*$/gm, '')
+    .split(';')
+    .map(statement => statement.trim())
+    .filter(Boolean);
+
+  for (const statement of statements) {
+    await mysqlPool.query(statement);
+  }
+}
+
+async function seedMySqlDatabase() {
+  const [userRows] = await mysqlPool.query('SELECT COUNT(*) AS count FROM users');
+  if (Number(userRows[0].count) > 0) {
+    console.log('MySQL database already contains users, skipping demo seed insertion.');
+    return;
+  }
+
+  const roles = [
+    [1, 'admin', 'System Administrator with complete access'],
+    [2, 'organizer', 'Event Organizer creating and managing community events'],
+    [3, 'volunteer', 'Community Volunteer registering and serving on duties'],
+    [4, 'coordinator', 'Field Coordinator managing attendance, check-ins, and assignments']
+  ];
+  for (const role of roles) {
+    await mysqlPool.execute(
+      'INSERT IGNORE INTO roles (id, name, description) VALUES (?, ?, ?)',
+      role
+    );
+  }
+
+  const categories = [
+    [1, 'Environmental & Green Campus', 'Tree plantation, lake cleaning, zero-waste drives', 'TreePine'],
+    [2, 'Healthcare & Blood Donation', 'Health screening camps, blood donation drives', 'HeartPulse'],
+    [3, 'Education & Literacy Outreach', 'Coding camps, school teaching, library donation', 'GraduationCap'],
+    [4, 'Disaster Relief & Community Aid', 'Food distribution, winter blanket drives, emergency aid', 'HandHelping'],
+    [5, 'Youth Sports & Cultural Fest', 'Marathons, inter-college events, cultural celebration', 'Trophy']
+  ];
+  for (const category of categories) {
+    await mysqlPool.execute(
+      'INSERT IGNORE INTO event_categories (id, name, description, icon) VALUES (?, ?, ?, ?)',
+      category
+    );
+  }
+
+  const passwordHash = await bcrypt.hash('Password@123', 10);
+  const users = [
+    [1, 1, 'Admin', 'admin@festiva.edu', '+91 98765 43210'],
+    [2, 2, 'Organiser', 'organizer@festiva.edu', '+91 98765 43211'],
+    [3, 4, 'Coordinator', 'coordinator@festiva.edu', '+91 98765 43212'],
+    [4, 3, 'Volunteer', 'volunteer@festiva.edu', '+91 98765 43213'],
+    [5, 3, 'Volunteer 2', 'volunteer2@festiva.edu', '+91 98765 43214'],
+    [6, 3, 'Volunteer 3', 'volunteer3@festiva.edu', '+91 98765 43215']
+  ];
+  for (const [id, roleId, name, email, phone] of users) {
+    await mysqlPool.execute(
+      `INSERT IGNORE INTO users (id, role_id, name, email, password, phone, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'active')`,
+      [id, roleId, name, email, passwordHash, phone]
+    );
+  }
+
+  console.log('MySQL schema and demo accounts are ready.');
+}
 
 export async function initDatabase() {
   console.log('Initializing database schema...');
@@ -186,6 +256,12 @@ export async function initDatabase() {
 }
 
 export async function seedDatabase() {
+  if (dbType === 'mysql') {
+    await initializeMySqlSchema();
+    await seedMySqlDatabase();
+    return;
+  }
+
   await initDatabase();
 
   const demoAccounts = [

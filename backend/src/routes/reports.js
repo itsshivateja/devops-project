@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { query, queryOne } from '../config/db.js';
+import { dbType, query, queryOne } from '../config/db.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
@@ -48,7 +48,7 @@ router.get('/event-participation', authenticateToken, async (req, res) => {
       params.push(end_date);
     }
 
-    sql += ' GROUP BY e.id ORDER BY e.start_date DESC';
+    sql += ' GROUP BY e.id, c.name, org.name ORDER BY e.start_date DESC';
 
     const report = await query(sql, params);
     return res.json({ success: true, count: report.length, data: report });
@@ -206,14 +206,17 @@ router.get('/dashboard-metrics', authenticateToken, async (req, res) => {
     const totalCertificates = (await queryOne('SELECT COUNT(*) as count FROM certificates')).count;
 
     // Monthly Participation Data for charts
+    const monthExpression = dbType === 'mysql'
+      ? "DATE_FORMAT(start_date, '%Y-%m')"
+      : "strftime('%Y-%m', start_date)";
     const monthlyParticipation = await query(`
       SELECT 
-        strftime('%Y-%m', start_date) as month,
+        ${monthExpression} as month,
         COUNT(DISTINCT e.id) as events_count,
         COUNT(DISTINCT vr.volunteer_id) as volunteers_participated
       FROM events e
       LEFT JOIN volunteer_registrations vr ON vr.event_id = e.id AND vr.status = 'approved'
-      GROUP BY strftime('%Y-%m', start_date)
+      GROUP BY ${monthExpression}
       ORDER BY month ASC
       LIMIT 6
     `);
