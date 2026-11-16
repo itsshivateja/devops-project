@@ -215,6 +215,9 @@ docker compose up --build
 - Backend API: `http://localhost:5001/api`
 - MySQL Port: `3306`
 
+### Vercel Backend
+Set the Vercel project root directory to `backend` and use Node.js `22.x` (also pinned in `backend/package.json` for `better-sqlite3` compatibility). Configure `JWT_SECRET` as a Vercel environment variable. SQLite files on Vercel are not persistent, so production deployments need a hosted database.
+
 ### Kubernetes Deployment
 ```bash
 # 1. Create the namespace and other resources.
