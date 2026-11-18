@@ -208,7 +208,9 @@ router.get('/dashboard-metrics', authenticateToken, async (req, res) => {
     // Monthly Participation Data for charts
     const monthExpression = dbType === 'mysql'
       ? "DATE_FORMAT(start_date, '%Y-%m')"
-      : "strftime('%Y-%m', start_date)";
+      : dbType === 'postgres' || dbType === 'postgresql'
+        ? "TO_CHAR(start_date, 'YYYY-MM')"
+        : "strftime('%Y-%m', start_date)";
     const monthlyParticipation = await query(`
       SELECT 
         ${monthExpression} as month,

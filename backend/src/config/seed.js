@@ -1,6 +1,62 @@
 import bcrypt from 'bcryptjs';
 import { readFileSync } from 'fs';
-import { dbType, mysqlPool, sqliteDb } from './db.js';
+import { dbType, mysqlPool, postgresPool, sqliteDb } from './db.js';
+
+async function initializePostgresSchema() {
+  const schema = readFileSync(new URL('./schema-postgres.sql', import.meta.url), 'utf8');
+  await postgresPool.query(schema);
+}
+
+async function seedPostgresDatabase() {
+  const roleResult = await postgresPool.query('SELECT COUNT(*) AS count FROM roles');
+  if (Number(roleResult.rows[0].count) === 0) {
+    await postgresPool.query(
+      `INSERT INTO roles (id, name, description) VALUES
+       (1, 'admin', 'System Administrator with complete access'),
+       (2, 'organizer', 'Event Organizer creating and managing community events'),
+       (3, 'volunteer', 'Community Volunteer registering and serving on duties'),
+       (4, 'coordinator', 'Field Coordinator managing attendance, check-ins, and assignments')
+       ON CONFLICT (id) DO NOTHING`
+    );
+  }
+
+  const categoryResult = await postgresPool.query('SELECT COUNT(*) AS count FROM event_categories');
+  if (Number(categoryResult.rows[0].count) === 0) {
+    await postgresPool.query(
+      `INSERT INTO event_categories (id, name, description, icon) VALUES
+       (1, 'Environmental & Green Campus', 'Tree plantation, lake cleaning, zero-waste drives', 'TreePine'),
+       (2, 'Healthcare & Blood Donation', 'Health screening camps, blood donation drives', 'HeartPulse'),
+       (3, 'Education & Literacy Outreach', 'Coding camps, school teaching, library donation', 'GraduationCap'),
+       (4, 'Disaster Relief & Community Aid', 'Food distribution, winter blanket drives, emergency aid', 'HandHelping'),
+       (5, 'Youth Sports & Cultural Fest', 'Marathons, inter-college events, cultural celebration', 'Trophy')
+       ON CONFLICT (id) DO NOTHING`
+    );
+  }
+
+  const userResult = await postgresPool.query('SELECT COUNT(*) AS count FROM users');
+  if (Number(userResult.rows[0].count) === 0) {
+    const passwordHash = await bcrypt.hash('Password@123', 10);
+    await postgresPool.query(
+      `INSERT INTO users (id, role_id, name, email, password, phone, status) VALUES
+       (1, 1, 'Admin', 'admin@festiva.edu', $1, '+91 98765 43210', 'active'),
+       (2, 2, 'Organiser', 'organizer@festiva.edu', $1, '+91 98765 43211', 'active'),
+       (3, 4, 'Coordinator', 'coordinator@festiva.edu', $1, '+91 98765 43212', 'active'),
+       (4, 3, 'Volunteer', 'volunteer@festiva.edu', $1, '+91 98765 43213', 'active'),
+       (5, 3, 'Volunteer 2', 'volunteer2@festiva.edu', $1, '+91 98765 43214', 'active'),
+       (6, 3, 'Volunteer 3', 'volunteer3@festiva.edu', $1, '+91 98765 43215', 'active')
+       ON CONFLICT (id) DO NOTHING`,
+      [passwordHash]
+    );
+  }
+
+  for (const table of ['roles', 'event_categories', 'users']) {
+    await postgresPool.query(
+      `SELECT setval(pg_get_serial_sequence('${table}', 'id'), GREATEST((SELECT COALESCE(MAX(id), 0) FROM ${table}), 1), true)`
+    );
+  }
+
+  console.log('PostgreSQL schema and demo accounts are ready.');
+}
 
 async function initializeMySqlSchema() {
   const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8')
@@ -259,6 +315,12 @@ export async function seedDatabase() {
   if (dbType === 'mysql') {
     await initializeMySqlSchema();
     await seedMySqlDatabase();
+    return;
+  }
+
+  if (dbType === 'postgres' || dbType === 'postgresql') {
+    await initializePostgresSchema();
+    await seedPostgresDatabase();
     return;
   }
 

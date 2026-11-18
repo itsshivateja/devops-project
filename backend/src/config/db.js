@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import mysql from 'mysql2/promise';
+import pg from 'pg';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -11,8 +12,19 @@ export const dbType = process.env.DB_TYPE || (process.env.VERCEL ? 'mysql' : 'sq
 
 let sqliteDb = null;
 let mysqlPool = null;
+let postgresPool = null;
 
-if (dbType === 'mysql') {
+if (dbType === 'postgres' || dbType === 'postgresql') {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('Missing PostgreSQL configuration: DATABASE_URL');
+  }
+
+  postgresPool = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }
+  });
+  console.log('Configured PostgreSQL database pool');
+} else if (dbType === 'mysql') {
   const requiredMySqlEnv = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
   const missingMySqlEnv = requiredMySqlEnv.filter(name => !process.env[name]);
   if (missingMySqlEnv.length) {
@@ -51,6 +63,30 @@ if (dbType === 'mysql') {
  * Handles placeholder translation (? is standard for both)
  */
 export async function query(sql, params = []) {
+  if (postgresPool) {
+    let index = 0;
+    const pgSql = sql.replace(/\?/g, () => `$${++index}`);
+    const trimmed = pgSql.trim();
+    let resultSql = pgSql;
+
+    if (/^INSERT\s/i.test(trimmed) && !/\bRETURNING\b/i.test(trimmed)) {
+      resultSql = `${pgSql.replace(/;\s*$/, '')} RETURNING id`;
+    }
+    if (/^UPDATE\s+notifications\s+SET\s+is_read\s*=\s*1/i.test(trimmed)) {
+      resultSql = pgSql.replace(/\b=\s*1\b/i, '= TRUE');
+    }
+
+    const result = await postgresPool.query(resultSql, params);
+    if (/^(SELECT|WITH|PRAGMA)\b/i.test(trimmed)) {
+      return result.rows;
+    }
+    return {
+      rows: result.rows,
+      insertId: result.rows[0]?.id,
+      affectedRows: result.rowCount
+    };
+  }
+
   if (mysqlPool) {
     const [rows] = await mysqlPool.execute(sql, params);
     return rows;
@@ -90,5 +126,5 @@ export async function queryOne(sql, params = []) {
   return rows;
 }
 
-export { sqliteDb, mysqlPool };
-export default { query, queryOne, sqliteDb, mysqlPool };
+export { sqliteDb, mysqlPool, postgresPool };
+export default { query, queryOne, sqliteDb, mysqlPool, postgresPool };
